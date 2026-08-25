@@ -41,3 +41,44 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/ptanu1000/self-healing-deployment:latest
+  deploy:
+   needs: test-and-build
+   runs-on: ubuntu-latest
+
+   steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+
+          script: |
+            # Check/install Docker
+            if ! command -v docker &> /dev/null
+            then
+              sudo dnf update -y
+              sudo dnf install -y docker
+              sudo systemctl enable --now docker
+            fi
+
+            sudo systemctl start docker
+
+            # Pull latest image
+            sudo docker pull ghcr.io/ptanu1000/self-healing-deployment:latest
+
+            # Remove old container
+            sudo docker stop self-healing-app || true
+            sudo docker rm self-healing-app || true
+
+            # Start new container
+            sudo docker run -d \
+              --name self-healing-app \
+              -p 8000:8000 \
+              ghcr.io/ptanu1000/self-healing-deployment:latest
+
+            # Wait for startup
+            sleep 5
+
+            # Health check
+            curl --fail http://localhost:8000/health  
